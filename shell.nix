@@ -10,7 +10,7 @@ let
 in
 pkgs.mkShell.override {
 } {
-  name = "discord-bot-thingy-devenv";
+  name = "bpd-devenv";
 
   nativeBuildInputs = with pkgs; [
     gdb

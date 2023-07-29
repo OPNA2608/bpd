@@ -12,7 +12,7 @@ let
   };
 in
 stdenv.mkDerivation (finalAttrs: {
-  pname = "discord-bot-thingy";
+  pname = "bpd";
   version = "0.0.0-local";
 
   src = lib.sources.cleanSourceWith {

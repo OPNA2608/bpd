@@ -15,7 +15,7 @@
 #include <concord/discord.h>
 #include <concord/log.h>
 
-#define PROJECT_NAME "discord-bot-thingy"
+#define PROJECT_NAME "bpd"
 
 static const char ERROR_PREFIX[] = "Somehow, something went wrong. Please report this to @punaduck: ";
 
