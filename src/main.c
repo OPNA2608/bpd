@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#define  _POSIX_C_SOURCE 200809L
+#define _POSIX_C_SOURCE 200809L
 #include <stdlib.h>
 //#undef _POSIX_C_SOURCE
 
 #include <linux/limits.h>
 
 #include <unistd.h> // sleep
+#include <pthread.h>
 
 #include <json.h>
 
@@ -19,6 +20,21 @@
 static const char ERROR_PREFIX[] = "Somehow, something went wrong. Please report this to @punaduck: ";
 
 static u64snowflake App_Id = 0;
+
+struct renderthreadData {
+	const char* workDir;
+	const char* renderCmd;
+	struct discord* client;
+	const u64snowflake channelId;
+};
+
+struct llFinishedRender {
+	char* finishedPath;
+	u64snowflake channelId;
+	struct llFinishedRender* next;
+};
+static struct llFinishedRender* finishedRender = NULL;
+static pthread_mutex_t llMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // ping
 const struct discord_create_guild_application_command interaction_ping_def = {
@@ -41,6 +57,83 @@ void interaction_ping_cmd (struct discord* client, const struct discord_interact
 		.content = "Pong!"
 	};
 	discord_edit_original_interaction_response (client, App_Id, event->token, &paramEdit, NULL);
+}
+
+void* render_thread (void* argsRaw) {
+	// CHILD
+	log_trace ("In fork");
+	struct renderthreadData* args = (struct renderthreadData*) argsRaw;
+
+	size_t len = strlen (args->workDir);
+	log_debug ("malloc(%zu)", len);
+	char* copyDir = malloc (++len);
+	strcpy (copyDir, args->workDir);
+
+	len = strlen (args->renderCmd);
+	log_debug ("malloc(%zu)", len);
+	char* copyCmd = malloc (++len);
+	strcpy (copyCmd, args->renderCmd);
+
+	u64snowflake channelId = args->channelId;
+
+	char* outFile = malloc (PATH_MAX);
+	snprintf (outFile, PATH_MAX,
+		"%s/output.ogg",
+		copyDir);
+
+	log_info ("Executing: %s", copyCmd);
+	int ret = system (copyCmd);
+
+	if (ret != 0) {
+		// TODO notify of error
+		log_error ("Rendering failed, code %d", ret);
+		pthread_exit (NULL);
+	}
+
+	struct llFinishedRender* newRender = malloc (sizeof (struct llFinishedRender));
+	newRender->finishedPath = outFile;
+	newRender->channelId = channelId;
+	newRender->next = NULL;
+
+	pthread_mutex_lock (&llMutex);
+	if (finishedRender == NULL) {
+		finishedRender = newRender;
+	} else {
+		struct llFinishedRender* wander = finishedRender;
+		while (wander->next != NULL) wander = wander->next;
+		wander->next = newRender;
+	}
+	pthread_mutex_unlock (&llMutex);
+
+	log_trace ("Render ready to be served! Exiting...");
+	pthread_exit (NULL);
+}
+
+void render_collector (struct discord* client, struct discord_timer *timer) {
+	log_debug ("render_collector");
+
+	pthread_mutex_lock (&llMutex);
+	if (finishedRender != NULL) {
+		log_debug ("Sending render %s.", finishedRender->finishedPath);
+		struct discord_create_message paramRender = {
+			.attachments = &(struct discord_attachments) {
+				.size = 1,
+				.array = (struct discord_attachment[]) {
+					{ .filename = finishedRender->finishedPath, },
+				},
+			},
+		};
+		CCORDcode sendRet = discord_create_message (client, finishedRender->channelId, &paramRender, NULL);
+		if (sendRet != CCORD_OK && sendRet != CCORD_PENDING) {
+			log_error ("Failed to send render");
+		}
+		log_trace ("Render sent!");
+
+		struct llFinishedRender* next = finishedRender->next;
+		free (finishedRender);
+		finishedRender = next;
+	}
+	pthread_mutex_unlock (&llMutex);
 }
 
 // vgmrender
@@ -68,8 +161,8 @@ void interaction_vgmrender_cmd (struct discord* client, const struct discord_int
 		char buf[1024];
 		snprintf (buf, sizeof (buf) / sizeof(buf[0]),
 			"User input is missing? Data: %p, Options: %p",
-			event->data,
-			event->data->options);
+			(void*)event->data,
+			(void*)event->data->options);
 		log_error (buf);
 
 		//char buf2[sizeof (buf) / sizeof(buf[0])];
@@ -140,34 +233,45 @@ void interaction_vgmrender_cmd (struct discord* client, const struct discord_int
 		attachmentUrl,
 		workdir);
 
-	log_info ("Executing: %s", renderCmd);
-	int ret = system (renderCmd);
+	size_t len = strlen (attachmentUrl);
+	log_debug ("malloc(%zu)", len);
+	char* threadcopyUrl = malloc (++len);
+	strcpy (threadcopyUrl, attachmentUrl);
 
-	if (ret != 0) {
-		// TODO notify of error
-		log_error ("Rendering failed, code %d", ret);
+	len = strlen (workdir);
+	log_debug ("malloc(%zu)", len);
+	char* threadcopyDir = malloc (++len);
+	strcpy (threadcopyDir, workdir);
+
+	len = strlen (renderCmd);
+	log_debug ("malloc(%zu)", len);
+	char* threadcopyCmd = malloc (++len);
+	strcpy (threadcopyCmd, renderCmd);
+
+	struct renderthreadData threadData = {
+		.workDir = threadcopyDir,
+		.renderCmd = threadcopyCmd,
+		.client = client,
+		.channelId = event->channel_id,
+	};
+
+	pthread_attr_t attr;
+	pthread_attr_init (&attr);
+	pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+	pthread_t tid;
+	if (pthread_create (&tid, &attr, render_thread, (void*)&threadData) != 0) {
+		log_error ("Failed to start render thread");
 		return;
 	}
 
-	char outFile[PATH_MAX];
-	snprintf (outFile, PATH_MAX,
-		"%s/output.wav",
-		workdir);
+	sleep (1);
 
+	// PARENT
+	log_trace ("In parent");
 	struct discord_edit_original_interaction_response paramEdit = {
-		.content = "Successfully rendered your request! Uploading result…",
+		.content = "Rendering your request! Result should be sent soon…",
 	};
 	discord_edit_original_interaction_response (client, App_Id, event->token, &paramEdit, NULL);
-
-	struct discord_create_message paramRender = {
-		.attachments = &(struct discord_attachments) {
-			.size = 1,
-			.array = (struct discord_attachment[]) {
-				{ .filename = outFile, },
-			},
-		},
-	};
-	discord_create_message (client, event->channel_id, &paramRender, NULL);
 }
 
 // registering
@@ -181,7 +285,7 @@ const struct interaction interactions[] = {
 };
 void on_ready (struct discord* client, const struct discord_ready* event) {
 	for (int i = 0; i < event->guilds->size; ++i) {
-		for (int j = 0; j < (sizeof (interactions) / sizeof (struct interaction)); ++j) {
+		for (size_t j = 0; j < (sizeof (interactions) / sizeof (struct interaction)); ++j) {
 			log_info ("Registering interaction %s on guild %" PRIu64, interactions[j].description.name,
 				event->guilds->array[i].id);
 			discord_create_guild_application_command (client, event->application->id, event->guilds->array[i].id,
@@ -199,7 +303,7 @@ void on_interaction (struct discord* client, const struct discord_interaction* e
 		return;
 	}
 
-	for (int i = 0; i < (sizeof (interactions) / sizeof (struct interaction)); ++i) {
+	for (size_t i = 0; i < (sizeof (interactions) / sizeof (struct interaction)); ++i) {
 		log_info ("Checking interaction %d, name %s", i, interactions[i].description.name);
 		if (strcmp (event->data->name, interactions[i].description.name) == 0) {
 			log_info ("Matched!");
@@ -212,8 +316,17 @@ void on_interaction (struct discord* client, const struct discord_interaction* e
 
 int main (void) {
 	struct discord* client = discord_config_init (PROJECT_NAME ".json");
+
 	discord_set_on_ready (client, &on_ready);
 	discord_set_on_interaction_create (client, &on_interaction);
+
+	discord_timer_interval (client,
+		render_collector,
+		NULL,
+		NULL,
+		0,
+		3 * 1000,
+		-1);
 
 	discord_run (client);
 

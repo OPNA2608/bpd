@@ -15,6 +15,10 @@ pkgs.mkShell.override {
   nativeBuildInputs = with pkgs; [
     gdb
     pkg-config
+    valgrind
+
+    # Bot requirements
+    ffmpeg
     vgmplay-libvgm
     wget
   ] ++ targetPackage.nativeBuildInputs;
