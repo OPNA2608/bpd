@@ -1,23 +1,28 @@
-#include "vgmrender.h"
-#include "common.h"
+#define _POSIX_C_SOURCE 200809L
+#include <stdlib.h>
+#undef _POSIX_C_SOURCE
 
 #ifndef DLAR_SCRIPT
+	#warning "DLAR_SCRIPT not set, going with './download_and_render.sh'"
 	#define DLAR_SCRIPT "./download_and_render.sh"
 #endif
 
 #include <string.h>
-#define _POSIX_C_SOURCE 200809L
-#include <stdlib.h>
 
 #include <linux/limits.h> // PATH_MAX
+#include <sys/wait.h> // WEXITSTATUS
 #include <unistd.h>
 
 #include <json.h>
 
 #include <concord/log.h>
 
+#include "vgmrender.h"
+#include "common.h"
+
 // data that is passed to the background render thread
 struct renderthreadData {
+	const char* vgmName;
 	const char* workDir;
 	const char* renderCmd;
 	const u64snowflake channelId;
@@ -40,6 +45,10 @@ void* render_thread (void* argsRaw) {
 	char* copyCmd = malloc (++len);
 	strncpy (copyCmd, args->renderCmd, len);
 
+	len = strlen (args->vgmName);
+	char* vgmName = malloc (++len);
+	strncpy (vgmName, args->vgmName, len);
+
 	u64snowflake channelId = args->channelId;
 
 	char* outFile = malloc (PATH_MAX);
@@ -51,20 +60,30 @@ void* render_thread (void* argsRaw) {
 
 	log_info ("Executing: %s", copyCmd);
 	int ret = system (copyCmd);
+	int retSan = (ret == -1) ? ret : WEXITSTATUS (ret);
 
-	if (ret != 0) {
-		// TODO notify of error
-		log_error ("Rendering failed, code %d", ret);
-		free (copyDir);
-		free (copyCmd);
-		free (outFile);
-		pthread_exit (NULL);
-	}
+	// we can't inform the user of a failure from here, so register the failed render
+	// and let the collector send away the bad news
+	bool renderSuccess = (retSan == 0);
 
 	struct llFinishedRender* newRender = malloc (sizeof (struct llFinishedRender));
+	newRender->success = renderSuccess;
 	newRender->finishedPath = outFile;
 	newRender->channelId = channelId;
 	newRender->next = NULL;
+
+	char* message = malloc (1024);
+	if (!renderSuccess) {
+		snprintf (message, 1024,
+			"Rendering %s failed, code %d!",
+			vgmName,
+			retSan);
+	} else {
+		snprintf (message, 1024,
+			"Here's your render of %s!",
+			vgmName);
+	}
+	newRender->message = message;
 
 	log_debug ("Registering completed render");
 	pthread_mutex_lock (&finishedRendersMutex);
@@ -132,7 +151,7 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 
 	// TODO check for attachmentId still being unset?
 
-	log_debug ("Extracting VGM url");
+	log_debug ("Extracting VGM name & url");
 	struct json_object* snowflakeMapping = json_tokener_parse (event->data->resolved->attachments);
 	struct json_object* attachmentDetails;
 	if (!json_object_object_get_ex (snowflakeMapping, attachmentId, &attachmentDetails)) {
@@ -148,8 +167,16 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		return;
 	}
 
+	struct json_object* attachmentNameObj;
+	if (!json_object_object_get_ex (attachmentDetails, "filename", &attachmentNameObj)) {
+		// TODO notify of error
+		log_error ("%s not found in %s", "filename", event->data->resolved->attachments);
+		return;
+	}
+
 	const char* attachmentUrl = json_object_get_string (attachmentUrlObj);
-	log_info ("Received VGM file: %s", attachmentUrl);
+	const char* attachmentName = json_object_get_string (attachmentNameObj);
+	log_info ("Received VGM file %s, URL %s", attachmentName, attachmentUrl);
 
 	char workdirTemplate[] = "/tmp/dbt-render.XXXXXX";
 	const char* workdir = mkdtemp (workdirTemplate);
@@ -178,7 +205,12 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 	char* threadcopyCmd = malloc (++len);
 	strcpy (threadcopyCmd, renderCmd);
 
+	len = strlen (renderCmd);
+	char* threadcopyName = malloc (++len);
+	strcpy (threadcopyName, attachmentName);
+
 	struct renderthreadData threadData = {
+		.vgmName = attachmentName,
 		.workDir = threadcopyDir,
 		.renderCmd = threadcopyCmd,
 		.channelId = event->channel_id,

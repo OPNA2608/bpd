@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define _POSIX_C_SOURCE 200809L
-#include <stdlib.h>
-//#undef _POSIX_C_SOURCE
-
 #include <unistd.h> // sleep
 
 #include <json.h>
@@ -12,11 +8,10 @@
 #include <concord/log.h>
 
 #include "common.h"
-
 #include "debugping.h"
 #include "vgmrender.h"
 
-const char ERROR_PREFIX[] = "Somehow, something went wrong. Please report this to @punaduck: ";
+const char ERROR_PREFIX[] = "Something went wrong. Please report this to @punaduck: ";
 
 u64snowflake App_Id = 0;
 
@@ -28,8 +23,9 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 
 	pthread_mutex_lock (&finishedRendersMutex);
 	if (finishedRenders != NULL) {
-		log_info ("Sending render %s.", finishedRenders->finishedPath);
+		log_info ("Sending render result for %s.", finishedRenders->finishedPath);
 		struct discord_create_message paramRender = {
+			.content = finishedRenders->message,
 			.attachments = &(struct discord_attachments) {
 				.size = 1,
 				.array = (struct discord_attachment[]) {
@@ -37,13 +33,19 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 				},
 			},
 		};
+
+		if (!finishedRenders->success) {
+			paramRender.attachments = NULL;
+		}
+
 		CCORDcode sendRet = discord_create_message (client, finishedRenders->channelId, &paramRender, NULL);
 		if (sendRet != CCORD_OK && sendRet != CCORD_PENDING) {
-			log_error ("Failed to send render");
+			log_error ("Failed to send render results");
 		}
-		log_info ("Render sent!");
+		log_info ("Render results sent!");
 
 		struct llFinishedRender* next = finishedRenders->next;
+		free (finishedRenders->message);
 		free (finishedRenders->finishedPath);
 		free (finishedRenders);
 		finishedRenders = next;

@@ -22,6 +22,8 @@ extern u64snowflake App_Id;
 
 // structure to describe a finished rendering job, waiting to be sent to the user
 struct llFinishedRender {
+	bool success;
+	char* message;
 	char* finishedPath;
 	u64snowflake channelId;
 	struct llFinishedRender* next;

@@ -1,9 +1,9 @@
-#include "debugping.h"
-#include "common.h"
-
 #include <unistd.h> // sleep
 
 #include <concord/log.h>
+
+#include "debugping.h"
+#include "common.h"
 
 void bpd_interaction_debugping_cmd (struct discord* client, const struct discord_interaction* event) {
   log_trace ("In bpd_interaction_debugping_cmd");

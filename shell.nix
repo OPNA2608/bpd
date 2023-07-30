@@ -27,6 +27,6 @@ pkgs.mkShell.override {
 
   shellHook = ''
     alias do-build="nix-build --no-out-link -E 'with import ${pkgsSrc} { }; callPackage ./default.nix { }'"
-    export NIX_CFLAGS_COMPILE="$(pkg-config --cflags json-c) $NIX_CFLAGS_COMPILE"
+    export NIX_CFLAGS_COMPILE="$(pkg-config --cflags json-c) -DDLAR_SCRIPT=\"\" $NIX_CFLAGS_COMPILE"
   '';
 }
