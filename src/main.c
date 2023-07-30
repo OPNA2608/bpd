@@ -24,11 +24,11 @@ struct llFinishedRender* finishedRenders = NULL;
 pthread_mutex_t finishedRendersMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void render_collector (struct discord* client, struct discord_timer *timer) {
-	log_trace ("render_collector");
+	log_trace ("In render_collector");
 
 	pthread_mutex_lock (&finishedRendersMutex);
 	if (finishedRenders != NULL) {
-		log_debug ("Sending render %s.", finishedRenders->finishedPath);
+		log_info ("Sending render %s.", finishedRenders->finishedPath);
 		struct discord_create_message paramRender = {
 			.attachments = &(struct discord_attachments) {
 				.size = 1,
@@ -85,9 +85,11 @@ const struct bpd_interaction bpd_interactions[] = {
 	{ .description = bpd_interaction_vgmrender_desc, .command = &bpd_interaction_vgmrender_cmd },
 };
 void on_ready (struct discord* client, const struct discord_ready* event) {
+	log_trace ("In on_ready");
 	App_Id = event->application->id;
 
 	for (int i = 0; i < event->guilds->size; ++i) {
+		log_debug ("Checking guild %" PRIu64, event->guilds->array[i].id);
 
 		// check what commands the guild has linked to us
 		struct discord_application_commands registeredAppCmds = { 0 };
@@ -95,9 +97,11 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 			.sync = &registeredAppCmds,
 		};
 		if (discord_get_guild_application_commands(client, App_Id, event->guilds->array[i].id, &ret) != CCORD_OK) continue;
+		log_debug ("Found %d interactions linked to us", registeredAppCmds.size);
 
 		// check for commands we no longer have, delete them
 		for (int i = 0; i < registeredAppCmds.size; ++i) {
+			log_debug ("Interaction %d: %s", i, registeredAppCmds.array[i].name);
 			bool stillExists = false;
 			for (size_t j = 0; j < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++j) {
 				if (strcmp (registeredAppCmds.array[i].name, bpd_interactions[j].description.name) == 0) {
@@ -106,34 +110,39 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 				}
 			}
 
-			if (!stillExists)
+			if (!stillExists) {
+				log_debug ("Stale interaction %s found, unregistering it", registeredAppCmds.array[i].name);
 				discord_delete_guild_application_command (client, App_Id, event->guilds->array[i].id,
 					registeredAppCmds.array[i].id, NULL);
+			}
 		}
 
 		// inform about commands we have
 		for (size_t j = 0; j < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++j) {
-			log_info ("Registering interaction %s on guild %" PRIu64, bpd_interactions[j].description.name,
-				event->guilds->array[i].id);
+			log_debug ("Registering interaction %s", bpd_interactions[j].description.name);
 			discord_create_guild_application_command (client, event->application->id, event->guilds->array[i].id,
 				(struct discord_create_guild_application_command*) &(bpd_interactions[j].description), NULL);
 		}
 	}
 
 	log_info ("Logged in as %s, ID %" PRIu64 ".", event->user->username, App_Id);
+	log_info ("Interactions:");
+	for (size_t i = 0; i < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++i) {
+		log_info ("%zu: %s", i, bpd_interactions[i].description.name);
+	}
 }
 
 void on_interaction (struct discord* client, const struct discord_interaction* event) {
-	log_info ("on_interaction");
+	log_trace ("In on_interaction");
 	if (event->type != DISCORD_INTERACTION_APPLICATION_COMMAND) {
-		log_info ("Ignoring non-slash interaction.");
+		log_info ("Ignoring attempted non-slash interaction");
 		return;
 	}
 
 	for (size_t i = 0; i < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++i) {
-		log_info ("Checking interaction %d, name %s", i, bpd_interactions[i].description.name);
+		log_debug ("Checking interaction %d, name %s", i, bpd_interactions[i].description.name);
 		if (strcmp (event->data->name, bpd_interactions[i].description.name) == 0) {
-			log_info ("Matched!");
+			log_info ("Matched, executing interaction");
 			(*bpd_interactions[i].command) (client, event);
 			return;
 		}
@@ -143,8 +152,8 @@ void on_interaction (struct discord* client, const struct discord_interaction* e
 
 	char rejectMsg[1024];
 	snprintf (rejectMsg, 1024,
-		"I'm sorry, I don't know the command '%s'. Maybe it doesn't exist anymore?",
-		event->data->name);
+		"I don't know the command '%s'. Maybe it doesn't exist anymore?", event->data->name);
+
   struct discord_interaction_response paramReject = {
     .type = DISCORD_INTERACTION_CHANNEL_MESSAGE_WITH_SOURCE,
     .data = &(struct discord_interaction_callback_data) {

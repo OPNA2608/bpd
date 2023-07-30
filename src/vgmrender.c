@@ -47,7 +47,7 @@ void* render_thread (void* argsRaw) {
 		"%s/output.ogg",
 		copyDir);
 
-	log_trace ("render_thread");
+	log_trace ("In render_thread");
 
 	log_info ("Executing: %s", copyCmd);
 	int ret = system (copyCmd);
@@ -66,6 +66,7 @@ void* render_thread (void* argsRaw) {
 	newRender->channelId = channelId;
 	newRender->next = NULL;
 
+	log_debug ("Registering completed render");
 	pthread_mutex_lock (&finishedRendersMutex);
 	if (finishedRenders == NULL) {
 		finishedRenders = newRender;
@@ -76,17 +77,18 @@ void* render_thread (void* argsRaw) {
 	}
 	pthread_mutex_unlock (&finishedRendersMutex);
 
-	log_trace ("Render ready to be served! Exiting...");
+	log_info ("Render ready to be served");
 	free (copyDir);
 	free (copyCmd);
 	pthread_exit (NULL);
 }
 
 void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord_interaction* event) {
-	log_info ("interaction_vgmrender_cmd");
+	log_trace ("In bpd_interaction_vgmrender_cmd");
 
+	log_debug ("Checking for sent user inputs");
 	if (!event->data || !event->data->options) {
-		// TODO refactor into error function
+		// TODO ad-hoc solution, refactor into sharable error function
 		char buf[1024];
 		snprintf (buf, sizeof (buf) / sizeof(buf[0]),
 			"User input is missing? Data: %p, Options: %p",
@@ -95,7 +97,6 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		log_error (buf);
 
 		char buf2[sizeof (buf) / sizeof(buf[0])];
-		//char buf2[(sizeof (buf) / sizeof(buf[0])) + (sizeof (ERROR_PREFIX) / sizeof(ERROR_PREFIX[0]))];
 		snprintf (buf2, sizeof (buf2) / sizeof(buf2[0]),
 			"%s%s",
 			ERROR_PREFIX,
@@ -109,14 +110,16 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		discord_create_interaction_response (client, event->id, event->token, &paramError, NULL);
 	}
 
+	log_debug ("Sending initial rendering request confirmation");
 	struct discord_interaction_response paramInitial = {
 		.type = DISCORD_INTERACTION_DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
 		.data = &(struct discord_interaction_callback_data) {
-			.content = "Rendering in process..."
+			.content = "Starting rendering process..."
 		}
 	};
 	discord_create_interaction_response (client, event->id, event->token, &paramInitial, NULL);
 
+	log_debug ("Processing user inputs");
 	char* attachmentId = NULL;
 	for (int i = 0; i < event->data->options->size; ++i) {
 		char* name = event->data->options->array[i].name;
@@ -127,8 +130,9 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		}
 	}
 
-	// TODO check for attachmentId still being unset
+	// TODO check for attachmentId still being unset?
 
+	log_debug ("Extracting VGM url");
 	struct json_object* snowflakeMapping = json_tokener_parse (event->data->resolved->attachments);
 	struct json_object* attachmentDetails;
 	if (!json_object_object_get_ex (snowflakeMapping, attachmentId, &attachmentDetails)) {
@@ -145,7 +149,7 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 	}
 
 	const char* attachmentUrl = json_object_get_string (attachmentUrlObj);
-	log_info ("VGM file: %s", attachmentUrl);
+	log_info ("Received VGM file: %s", attachmentUrl);
 
 	char workdirTemplate[] = "/tmp/dbt-render.XXXXXX";
 	const char* workdir = mkdtemp (workdirTemplate);
@@ -154,6 +158,7 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		log_error ("Failed to create temp dir");
 		return;
 	}
+	log_info ("Created rendering directory: %s", workdir);
 
 	// TODO this is awful, write all of this in proper C, I just CBA rn
 	char renderCmd[1024];
@@ -163,18 +168,13 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		attachmentUrl,
 		workdir);
 
-	size_t len = strlen (attachmentUrl);
-	log_debug ("malloc(%zu)", len);
-	char* threadcopyUrl = malloc (++len);
-	strcpy (threadcopyUrl, attachmentUrl);
+	log_debug ("Preparing rendering thread arguments");
 
-	len = strlen (workdir);
-	log_debug ("malloc(%zu)", len);
+	size_t len = strlen (workdir);
 	char* threadcopyDir = malloc (++len);
 	strcpy (threadcopyDir, workdir);
 
 	len = strlen (renderCmd);
-	log_debug ("malloc(%zu)", len);
 	char* threadcopyCmd = malloc (++len);
 	strcpy (threadcopyCmd, renderCmd);
 
@@ -184,17 +184,19 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		.channelId = event->channel_id,
 	};
 
+	log_info ("Launching rendering thread");
 	pthread_attr_t attr;
 	pthread_attr_init (&attr);
 	pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
 	pthread_t tid;
 	if (pthread_create (&tid, &attr, render_thread, (void*)&threadData) != 0) {
+		// TODO notify of error
 		log_error ("Failed to start render thread");
 		return;
 	}
 
 	struct discord_edit_original_interaction_response paramEdit = {
-		.content = "Rendering your request! Result should be sent soon…",
+		.content = "Started rendering your request! This may take some time, please be patient…",
 	};
 	discord_edit_original_interaction_response (client, App_Id, event->token, &paramEdit, NULL);
 
