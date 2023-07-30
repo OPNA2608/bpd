@@ -6,10 +6,13 @@ set -e
 URL="$1"
 WORKDIR="$2"
 
-pushd "${WORKDIR}"
+cd "${WORKDIR}"
 
-wget -O output.vgm "${URL}"
-vgmplay output.vgm
-ffmpeg -i output.wav -q:a 8 output.ogg -hide_banner -y
+echo "Downloading VGM file from ${URL}..."
+wget -qO output.vgm "${URL}"
 
-popd
+echo "Trying to render the file..."
+vgmplay output.vgm >/dev/null
+
+echo "Compressing the render for uploading..."
+ffmpeg -i output.wav -q:a 8 output.ogg -hide_banner -y -v error

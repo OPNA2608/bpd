@@ -5,33 +5,38 @@
 }:
 
 stdenv.mkDerivation (finalAttrs: {
-	pname = "concord";
-	version = "2.2.1";
+  pname = "concord";
+  version = "2.2.1";
 
-	src = fetchFromGitHub {
-		owner = "Cogmasters";
-		repo = "concord";
-		rev = "v${finalAttrs.version}";
-		hash = "sha256-8k/W6007U1/s3vx03i1929a5RKZtpW/jOr4JDwmzwp8=";
-	};
+  src = fetchFromGitHub {
+    owner = "Cogmasters";
+    repo = "concord";
+    rev = "v${finalAttrs.version}";
+    hash = "sha256-8k/W6007U1/s3vx03i1929a5RKZtpW/jOr4JDwmzwp8=";
+  };
 
-	strictDeps = true;
+  strictDeps = true;
 
-	propagatedBuildInputs = [
-		curl
-	];
+  propagatedBuildInputs = [
+    curl
+  ];
 
-	enableParallelBuilding = true;
+  enableParallelBuilding = true;
 
-	makeFlags = [
+  env.NIX_CFLAGS_COMPILE = toString [
+    "-DCCORD_SIGINTCATCH"
+    "-O0"
+    "-g"
+  ];
+
+  makeFlags = [
     (if stdenv.hostPlatform.isStatic then "static" else "shared")
   ];
 
-  preBuild = ''
-    export CFLAGS="-DCCORD_SIGINTCATCH"
-  '';
+  hardeningDisable = [ "fortify" ];
+  dontStrip = true;
 
-	installFlags = [
-		"PREFIX=$(out)"
-	];
+  installFlags = [
+    "PREFIX=$(out)"
+  ];
 })
