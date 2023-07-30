@@ -1,6 +1,7 @@
 { stdenv
 , lib
 , fetchFromGitHub
+, buildPackages
 , curl
 }:
 
@@ -15,7 +16,17 @@ stdenv.mkDerivation (finalAttrs: {
     hash = "sha256-8k/W6007U1/s3vx03i1929a5RKZtpW/jOr4JDwmzwp8=";
   };
 
+  postPatch = ''
+    # Fix cross
+    substituteInPlace gencodecs/Makefile \
+      --replace '$(CC) -c $(CFLAGS) $< -o $@' '${stdenv.cc.targetPrefix}cc -c $(CFLAGS) $< -o $@'
+  '';
+
   strictDeps = true;
+
+  pkgsBuildBuild = [
+    buildPackages.stdenv.cc
+  ];
 
   propagatedBuildInputs = [
     curl
