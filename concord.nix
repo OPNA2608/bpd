@@ -19,7 +19,9 @@ stdenv.mkDerivation (finalAttrs: {
   postPatch = ''
     # Fix cross
     substituteInPlace gencodecs/Makefile \
-      --replace '$(CC) -c $(CFLAGS) $< -o $@' '${stdenv.cc.targetPrefix}cc -c $(CFLAGS) $< -o $@'
+      --replace 'CC' 'HOST_CC' \
+      --replace 'CPP' 'HOST_CPP' \
+      --replace '$(HOST_CC) -c $(CFLAGS) $< -o $@' '$(CC) -c $(CFLAGS) $< -o $@'
   '';
 
   strictDeps = true;

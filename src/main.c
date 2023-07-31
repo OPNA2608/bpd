@@ -15,7 +15,7 @@ const char ERROR_PREFIX[] = "Something went wrong. Please report this to @punadu
 
 u64snowflake App_Id = 0;
 
-struct llFinishedRender* finishedRenders = NULL;
+volatile struct llFinishedRender* finishedRenders = NULL;
 pthread_mutex_t finishedRendersMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void render_collector (struct discord* client, struct discord_timer *timer) {
@@ -25,29 +25,37 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 	if (finishedRenders != NULL) {
 		log_info ("Sending render result for %s.", finishedRenders->finishedPath);
 		struct discord_create_message paramRender = {
-			.content = finishedRenders->message,
+			.content = (char*) finishedRenders->message,
 			.attachments = &(struct discord_attachments) {
 				.size = 1,
 				.array = (struct discord_attachment[]) {
-					{ .filename = finishedRenders->finishedPath, },
+					{ .filename = (char*) finishedRenders->finishedPath, },
 				},
 			},
 		};
 
+		// there might not actually be a valid finishedPath
 		if (!finishedRenders->success) {
 			paramRender.attachments = NULL;
 		}
 
-		CCORDcode sendRet = discord_create_message (client, finishedRenders->channelId, &paramRender, NULL);
-		if (sendRet != CCORD_OK && sendRet != CCORD_PENDING) {
+		// blocking sending
+		CCORDcode sendRet = discord_create_message (client, *finishedRenders->channelId, &paramRender,
+			&(struct discord_ret_message) {
+				.sync = DISCORD_SYNC_FLAG,
+			});
+		if (sendRet != CCORD_OK) {
 			log_error ("Failed to send render results");
+		} else {
+			log_info ("Render results sent!");
 		}
-		log_info ("Render results sent!");
 
-		struct llFinishedRender* next = finishedRenders->next;
-		free (finishedRenders->message);
-		free (finishedRenders->finishedPath);
-		free (finishedRenders);
+		// unregister & free processed render
+		volatile struct llFinishedRender* next = finishedRenders->next;
+		free ((char*) finishedRenders->message);
+		free ((char*) finishedRenders->finishedPath);
+		free ((u64snowflake*) finishedRenders->channelId);
+		free ((struct llFinishedRender*) finishedRenders);
 		finishedRenders = next;
 	}
 	pthread_mutex_unlock (&finishedRendersMutex);
@@ -178,7 +186,7 @@ int main (void) {
 		NULL,
 		NULL,
 		0,
-		3 * 1000,
+		10 * 1000,
 		-1);
 
 	discord_run (client);

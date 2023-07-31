@@ -23,14 +23,14 @@ extern u64snowflake App_Id;
 // structure to describe a finished rendering job, waiting to be sent to the user
 struct llFinishedRender {
 	bool success;
-	char* message;
-	char* finishedPath;
-	u64snowflake channelId;
-	struct llFinishedRender* next;
+	const char* message;
+	const char* finishedPath;
+	const u64snowflake* channelId;
+	volatile struct llFinishedRender* next;
 };
 
 // shared linked-list structure that holds finished rendering details
-extern struct llFinishedRender* finishedRenders;
+extern volatile struct llFinishedRender* finishedRenders;
 
 // a mutex to make access to the shared LL thread-safe
 extern pthread_mutex_t finishedRendersMutex;

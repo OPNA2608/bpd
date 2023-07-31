@@ -25,7 +25,7 @@ struct renderthreadData {
 	const char* vgmName;
 	const char* workDir;
 	const char* renderCmd;
-	const u64snowflake channelId;
+	const u64snowflake* channelId;
 };
 
 // a thread that runs in the background to render some audio
@@ -34,32 +34,15 @@ struct renderthreadData {
 void* render_thread (void* argsRaw) {
 	struct renderthreadData* args = (struct renderthreadData*) argsRaw;
 
-	// something seems to be flawed with the way the data is passed to the render thread, seems to be made invalid
-	// worked around here by instantly making copies of the values
-
-	size_t len = strlen (args->workDir);
-	char* copyDir = malloc (++len);
-	strncpy (copyDir, args->workDir, len);
-
-	len = strlen (args->renderCmd);
-	char* copyCmd = malloc (++len);
-	strncpy (copyCmd, args->renderCmd, len);
-
-	len = strlen (args->vgmName);
-	char* vgmName = malloc (++len);
-	strncpy (vgmName, args->vgmName, len);
-
-	u64snowflake channelId = args->channelId;
-
 	char* outFile = malloc (PATH_MAX);
 	snprintf (outFile, PATH_MAX,
 		"%s/output.ogg",
-		copyDir);
+		args->workDir);
 
 	log_trace ("In render_thread");
 
-	log_info ("Executing: %s", copyCmd);
-	int ret = system (copyCmd);
+	log_info ("Executing: %s", args->renderCmd);
+	int ret = system (args->renderCmd);
 	int retSan = (ret == -1) ? ret : WEXITSTATUS (ret);
 
 	// we can't inform the user of a failure from here, so register the failed render
@@ -69,19 +52,19 @@ void* render_thread (void* argsRaw) {
 	struct llFinishedRender* newRender = malloc (sizeof (struct llFinishedRender));
 	newRender->success = renderSuccess;
 	newRender->finishedPath = outFile;
-	newRender->channelId = channelId;
+	newRender->channelId = args->channelId;
 	newRender->next = NULL;
 
 	char* message = malloc (1024);
 	if (!renderSuccess) {
 		snprintf (message, 1024,
 			"Rendering %s failed, code %d!",
-			vgmName,
+			args->vgmName,
 			retSan);
 	} else {
 		snprintf (message, 1024,
 			"Here's your render of %s!",
-			vgmName);
+			args->vgmName);
 	}
 	newRender->message = message;
 
@@ -90,15 +73,16 @@ void* render_thread (void* argsRaw) {
 	if (finishedRenders == NULL) {
 		finishedRenders = newRender;
 	} else {
-		struct llFinishedRender* wander = finishedRenders;
+		volatile struct llFinishedRender* wander = finishedRenders;
 		while (wander->next != NULL) wander = wander->next;
 		wander->next = newRender;
 	}
 	pthread_mutex_unlock (&finishedRendersMutex);
 
 	log_info ("Render ready to be served");
-	free (copyDir);
-	free (copyCmd);
+	free ((char*) args->workDir);
+	free ((char*) args->renderCmd);
+	free (argsRaw);
 	pthread_exit (NULL);
 }
 
@@ -199,29 +183,31 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 
 	size_t len = strlen (workdir);
 	char* threadcopyDir = malloc (++len);
-	strcpy (threadcopyDir, workdir);
+	strncpy (threadcopyDir, workdir, len);
 
 	len = strlen (renderCmd);
 	char* threadcopyCmd = malloc (++len);
-	strcpy (threadcopyCmd, renderCmd);
+	strncpy (threadcopyCmd, renderCmd, len);
 
-	len = strlen (renderCmd);
+	len = strlen (attachmentName);
 	char* threadcopyName = malloc (++len);
-	strcpy (threadcopyName, attachmentName);
+	strncpy (threadcopyName, attachmentName, len);
 
-	struct renderthreadData threadData = {
-		.vgmName = attachmentName,
-		.workDir = threadcopyDir,
-		.renderCmd = threadcopyCmd,
-		.channelId = event->channel_id,
-	};
+	u64snowflake* threadcopyChannel = malloc (sizeof (event->channel_id));
+	*threadcopyChannel = event->channel_id;
+
+	struct renderthreadData* threadData = malloc (sizeof (struct renderthreadData));
+	threadData->vgmName = threadcopyName;
+	threadData->workDir = threadcopyDir;
+	threadData->renderCmd = threadcopyCmd;
+	threadData->channelId = threadcopyChannel;
 
 	log_info ("Launching rendering thread");
 	pthread_attr_t attr;
 	pthread_attr_init (&attr);
 	pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
 	pthread_t tid;
-	if (pthread_create (&tid, &attr, render_thread, (void*)&threadData) != 0) {
+	if (pthread_create (&tid, &attr, render_thread, (void*) threadData) != 0) {
 		// TODO notify of error
 		log_error ("Failed to start render thread");
 		return;
