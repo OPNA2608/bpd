@@ -26,17 +26,16 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 		log_info ("Sending render result for %s.", finishedRenders->finishedPath);
 		struct discord_create_message paramRender = {
 			.content = (char*) finishedRenders->message,
-			.attachments = &(struct discord_attachments) {
-				.size = 1,
-				.array = (struct discord_attachment[]) {
-					{ .filename = (char*) finishedRenders->finishedPath, },
-				},
-			},
 		};
 
 		// there might not actually be a valid finishedPath
-		if (!finishedRenders->success) {
-			paramRender.attachments = NULL;
+		if (finishedRenders->success) {
+			struct discord_attachment* attachment = calloc (1, sizeof (struct discord_attachment));
+			attachment->filename = (char*) finishedRenders->finishedPath;
+			struct discord_attachments* attachments = calloc (1, sizeof (struct discord_attachments));
+			attachments->size = 1;
+			attachments->array = attachment;
+			paramRender.attachments = attachments;
 		}
 
 		// blocking sending
@@ -48,6 +47,11 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 			log_error ("Failed to send render results");
 		} else {
 			log_info ("Render results sent!");
+		}
+
+		if (finishedRenders->success) {
+			free (paramRender.attachments->array);
+			free (paramRender.attachments);
 		}
 
 		// unregister & free processed render
@@ -85,7 +89,7 @@ const struct discord_create_guild_application_command bpd_interaction_vgmrender_
   .name = "vgmrender",
   .description = "Render a VGM",
   .options = &(struct discord_application_command_options) {
-    .size = sizeof (interaction_vgmrender_desc_args) / sizeof (interaction_vgmrender_desc_args[0]),
+    .size = ARRAY_LENGTH (interaction_vgmrender_desc_args),
     .array = interaction_vgmrender_desc_args,
   },
 };
@@ -113,7 +117,7 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 		for (int i = 0; i < registeredAppCmds.size; ++i) {
 			log_debug ("Interaction %d: %s", i, registeredAppCmds.array[i].name);
 			bool stillExists = false;
-			for (size_t j = 0; j < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++j) {
+			for (size_t j = 0; j < ARRAY_LENGTH (bpd_interactions); ++j) {
 				if (strcmp (registeredAppCmds.array[i].name, bpd_interactions[j].description.name) == 0) {
 					stillExists = true;
 					break;
@@ -128,7 +132,7 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 		}
 
 		// inform about commands we have
-		for (size_t j = 0; j < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++j) {
+		for (size_t j = 0; j < ARRAY_LENGTH (bpd_interactions); ++j) {
 			log_debug ("Registering interaction %s", bpd_interactions[j].description.name);
 			discord_create_guild_application_command (client, event->application->id, event->guilds->array[i].id,
 				(struct discord_create_guild_application_command*) &(bpd_interactions[j].description), NULL);
@@ -137,7 +141,7 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 
 	log_info ("Logged in as %s, ID %" PRIu64 ".", event->user->username, App_Id);
 	log_info ("Interactions:");
-	for (size_t i = 0; i < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++i) {
+	for (size_t i = 0; i < ARRAY_LENGTH (bpd_interactions); ++i) {
 		log_info ("%zu: %s", i, bpd_interactions[i].description.name);
 	}
 }
@@ -149,7 +153,7 @@ void on_interaction (struct discord* client, const struct discord_interaction* e
 		return;
 	}
 
-	for (size_t i = 0; i < (sizeof (bpd_interactions) / sizeof (bpd_interactions[0])); ++i) {
+	for (size_t i = 0; i < ARRAY_LENGTH (bpd_interactions); ++i) {
 		log_debug ("Checking interaction %d, name %s", i, bpd_interactions[i].description.name);
 		if (strcmp (event->data->name, bpd_interactions[i].description.name) == 0) {
 			log_info ("Matched, executing interaction");

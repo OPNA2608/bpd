@@ -49,24 +49,37 @@ void* render_thread (void* argsRaw) {
 	// and let the collector send away the bad news
 	bool renderSuccess = (retSan == 0);
 
+	char* message = malloc (DISCORD_MAX_MESSAGE_LEN);
+	int formatSuccess;
+	if (!renderSuccess) {
+		const char* failureMsg = "Rendering `%.*s` failed, code %d!";
+		const size_t failureMsgLen = strlen (failureMsg) - 2 - 1 + 1;
+		formatSuccess = snprintf (message, DISCORD_MAX_MESSAGE_LEN,
+			failureMsg,
+			DISCORD_MAX_MESSAGE_LEN - failureMsgLen, args->vgmName,
+			retSan);
+	} else {
+		const char* successMsg = "Here's your render of `%.*s`!";
+		const size_t successMsgLen = strlen (successMsg) - 2 + 1;
+		formatSuccess = snprintf (message, DISCORD_MAX_MESSAGE_LEN,
+			successMsg,
+			DISCORD_MAX_MESSAGE_LEN - successMsgLen, args->vgmName);
+	}
+
+	if (formatSuccess < 0 || formatSuccess >= DISCORD_MAX_MESSAGE_LEN) {
+		log_error ("Formatting response failed: expected 0 <= x < %zu, received response %i",
+			DISCORD_MAX_MESSAGE_LEN, formatSuccess);
+		// TODO insert owner ping prefix
+		snprintf (message, DISCORD_MAX_MESSAGE_LEN,
+			"Formatting response failed!");
+	}
+
 	struct llFinishedRender* newRender = malloc (sizeof (struct llFinishedRender));
 	newRender->success = renderSuccess;
+	newRender->message = message;
 	newRender->finishedPath = outFile;
 	newRender->channelId = args->channelId;
 	newRender->next = NULL;
-
-	char* message = malloc (1024);
-	if (!renderSuccess) {
-		snprintf (message, 1024,
-			"Rendering %s failed, code %d!",
-			args->vgmName,
-			retSan);
-	} else {
-		snprintf (message, 1024,
-			"Here's your render of %s!",
-			args->vgmName);
-	}
-	newRender->message = message;
 
 	log_debug ("Registering completed render");
 	pthread_mutex_lock (&finishedRendersMutex);
@@ -93,14 +106,14 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 	if (!event->data || !event->data->options) {
 		// TODO ad-hoc solution, refactor into sharable error function
 		char buf[1024];
-		snprintf (buf, sizeof (buf) / sizeof(buf[0]),
+		snprintf (buf, ARRAY_LENGTH (buf),
 			"User input is missing? Data: %p, Options: %p",
 			(void*)event->data,
 			(void*)event->data->options);
 		log_error (buf);
 
-		char buf2[sizeof (buf) / sizeof(buf[0])];
-		snprintf (buf2, sizeof (buf2) / sizeof(buf2[0]),
+		char buf2[ARRAY_LENGTH (buf)];
+		snprintf (buf2, ARRAY_LENGTH (buf2),
 			"%s%s",
 			ERROR_PREFIX,
 			buf);
@@ -173,7 +186,7 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 
 	// TODO this is awful, write all of this in proper C, I just CBA rn
 	char renderCmd[1024];
-	snprintf (renderCmd, sizeof (renderCmd) / sizeof (renderCmd[0]),
+	snprintf (renderCmd, ARRAY_LENGTH (renderCmd),
 		"'%s' '%s' '%s'",
 		DLAR_SCRIPT,
 		attachmentUrl,
@@ -213,12 +226,25 @@ void bpd_interaction_vgmrender_cmd (struct discord* client, const struct discord
 		return;
 	}
 
-	struct discord_edit_original_interaction_response paramEdit = {
-		.content = "Started rendering your request! This may take some time, please be patient…",
-	};
-	discord_edit_original_interaction_response (client, App_Id, event->token, &paramEdit, NULL);
+	char acknowledgeMsg[DISCORD_MAX_MESSAGE_LEN];
+	const char acknowledgeMsgSkel[] = "Started rendering `%.*s`! This may take some time, please be patient…";
+	const size_t acknowledgeMsgSkelLen = strlen (acknowledgeMsgSkel) - 2 + 1;
+	int formatSuccess = snprintf (acknowledgeMsg, DISCORD_MAX_MESSAGE_LEN,
+		acknowledgeMsgSkel,
+		// TODO do checked cast here?
+		(int) ((sizeof (acknowledgeMsg) / sizeof (acknowledgeMsg[0])) - acknowledgeMsgSkelLen), attachmentName);
 
-	// something seems to be flawed with the way the data is passed to the render thread, seems to be made invalid
-	// worked around here by waiting abit before returning
-	sleep (1);
+	if (formatSuccess < 0 || formatSuccess >= (int) (sizeof (acknowledgeMsg) / sizeof (acknowledgeMsg[0]))) {
+		// TODO notify of error
+		log_error ("Failed to format response");
+		return;
+	}
+
+	struct discord_edit_original_interaction_response paramEdit = {
+		.content = acknowledgeMsg,
+	};
+	discord_edit_original_interaction_response (client, App_Id, event->token, &paramEdit,
+		&(struct discord_ret_interaction_response) {
+			.sync = DISCORD_SYNC_FLAG,
+		});
 }

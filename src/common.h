@@ -35,4 +35,6 @@ extern volatile struct llFinishedRender* finishedRenders;
 // a mutex to make access to the shared LL thread-safe
 extern pthread_mutex_t finishedRendersMutex;
 
+#define ARRAY_LENGTH(arr) (sizeof (arr) / sizeof (arr[0]))
+
 #endif // BPD_COMMON_H
