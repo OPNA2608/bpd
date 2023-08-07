@@ -4,11 +4,15 @@
 , cmake
 , concord ? null
 , json_c
+
+# for concord
+, darwin
 }:
 
 let
   concord' = if (concord != null) then concord else callPackage ./concord.nix {
     inherit stdenv;
+    inherit (darwin.apple_sdk.frameworks) CoreServices;
   };
 in
 stdenv.mkDerivation (finalAttrs: {

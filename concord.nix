@@ -4,6 +4,7 @@
 , fetchpatch
 , buildPackages
 , curl
+, CoreServices
 }:
 
 stdenv.mkDerivation (finalAttrs: {
@@ -56,6 +57,10 @@ stdenv.mkDerivation (finalAttrs: {
     }))
   ];
 
+  buildInputs = lib.optionals stdenv.hostPlatform.isDarwin [
+    CoreServices
+  ];
+
   enableParallelBuilding = true;
 
   env.NIX_CFLAGS_COMPILE = toString [
@@ -74,4 +79,8 @@ stdenv.mkDerivation (finalAttrs: {
   installFlags = [
     "PREFIX=$(out)"
   ];
+
+  postFixup = lib.optionalString stdenv.hostPlatform.isDarwin ''
+    install_name_tool -id $out/lib/libdiscord.so $out/lib/libdiscord.so
+  '';
 })

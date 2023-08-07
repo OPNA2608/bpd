@@ -1,15 +1,18 @@
-#define _POSIX_C_SOURCE 200809L
-#include <stdlib.h>
-#undef _POSIX_C_SOURCE
-
 #ifndef DLAR_SCRIPT
 	#warning "DLAR_SCRIPT not set, going with './download_and_render.sh'"
 	#define DLAR_SCRIPT "./download_and_render.sh"
 #endif
 
+#include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
+#if defined (__linux__)
 #include <linux/limits.h> // PATH_MAX
+#elif defined (__APPLE__)
+#include <sys/syslimits.h> // PATH_MAX
+#endif
+
 #include <sys/wait.h> // WEXITSTATUS
 #include <unistd.h>
 
