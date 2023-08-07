@@ -67,11 +67,11 @@ void render_collector (struct discord* client, struct discord_timer *timer) {
 
 // registering
 struct bpd_interaction {
-	struct discord_create_guild_application_command description;
+	const struct discord_create_guild_application_command* description;
 	void (*command) (struct discord*, const struct discord_interaction*);
 };
 
-const struct discord_create_guild_application_command bpd_interaction_debugping_desc = {
+static const struct discord_create_guild_application_command bpd_interaction_debugping_desc = {
   .name = "debugping",
   .description = "Ping command that uses early ACK + artificial delay to mimic a long rendering process",
 };
@@ -95,8 +95,8 @@ const struct discord_create_guild_application_command bpd_interaction_vgmrender_
 };
 
 const struct bpd_interaction bpd_interactions[] = {
-	{ .description = bpd_interaction_debugping_desc, .command = &bpd_interaction_debugping_cmd },
-	{ .description = bpd_interaction_vgmrender_desc, .command = &bpd_interaction_vgmrender_cmd },
+	{ .description = &bpd_interaction_debugping_desc, .command = &bpd_interaction_debugping_cmd },
+	{ .description = &bpd_interaction_vgmrender_desc, .command = &bpd_interaction_vgmrender_cmd },
 };
 void on_ready (struct discord* client, const struct discord_ready* event) {
 	log_trace ("In on_ready");
@@ -118,7 +118,7 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 			log_debug ("Interaction %d: %s", i, registeredAppCmds.array[i].name);
 			bool stillExists = false;
 			for (size_t j = 0; j < ARRAY_LENGTH (bpd_interactions); ++j) {
-				if (strcmp (registeredAppCmds.array[i].name, bpd_interactions[j].description.name) == 0) {
+				if (strcmp (registeredAppCmds.array[i].name, bpd_interactions[j].description->name) == 0) {
 					stillExists = true;
 					break;
 				}
@@ -133,16 +133,16 @@ void on_ready (struct discord* client, const struct discord_ready* event) {
 
 		// inform about commands we have
 		for (size_t j = 0; j < ARRAY_LENGTH (bpd_interactions); ++j) {
-			log_debug ("Registering interaction %s", bpd_interactions[j].description.name);
+			log_debug ("Registering interaction %s", bpd_interactions[j].description->name);
 			discord_create_guild_application_command (client, event->application->id, event->guilds->array[i].id,
-				(struct discord_create_guild_application_command*) &(bpd_interactions[j].description), NULL);
+				(struct discord_create_guild_application_command*) (bpd_interactions[j].description), NULL);
 		}
 	}
 
 	log_info ("Logged in as %s, ID %" PRIu64 ".", event->user->username, App_Id);
 	log_info ("Interactions:");
 	for (size_t i = 0; i < ARRAY_LENGTH (bpd_interactions); ++i) {
-		log_info ("%zu: %s", i, bpd_interactions[i].description.name);
+		log_info ("%zu: %s", i, bpd_interactions[i].description->name);
 	}
 }
 
@@ -154,8 +154,8 @@ void on_interaction (struct discord* client, const struct discord_interaction* e
 	}
 
 	for (size_t i = 0; i < ARRAY_LENGTH (bpd_interactions); ++i) {
-		log_debug ("Checking interaction %d, name %s", i, bpd_interactions[i].description.name);
-		if (strcmp (event->data->name, bpd_interactions[i].description.name) == 0) {
+		log_debug ("Checking interaction %d, name %s", i, bpd_interactions[i].description->name);
+		if (strcmp (event->data->name, bpd_interactions[i].description->name) == 0) {
 			log_info ("Matched, executing interaction");
 			(*bpd_interactions[i].command) (client, event);
 			return;
